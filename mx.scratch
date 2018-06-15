@@ -24,8 +24,8 @@
   <config>
     <name>Li-ion Battery Charger-Discharger</name>				
     <device>STM32F103CBTx</device>		 
-    <heapSize>0x1000</heapSize>
-    <stackSize>0x800</stackSize>
+    <heapSize>0x0800</heapSize>
+    <stackSize>0x0C00</stackSize>
     
     	<board>custom</board>
 			
