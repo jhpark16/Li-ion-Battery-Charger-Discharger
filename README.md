@@ -49,7 +49,7 @@ The voltage across the lithium-ion battery is up to 8.6V and cannot be directly 
 
 ### The constructed circuit
 
-![Charger picture](images/STM32F103C8T6_charger.jpg)
+![Charger picture](images/Charger_Setup.jpg)
 
 
 

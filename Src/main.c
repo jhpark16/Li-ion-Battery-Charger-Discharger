@@ -178,33 +178,39 @@ int main(void)
   MX_ADC1_Init();
   MX_ADC2_Init();
   /* USER CODE BEGIN 2 */
-  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
-  HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-	
-	
-	HAL_TIM_Base_Start_IT(&htim1);
-	//LL_TIM_GenerateEvent_UPDATE(TIM1);
-	//LCDI2C_init(0x27,20,4);
-	// The I2C address is 0x20 + A2,A1,A0
-	// A2, A1, A0 of PCF8574 are high (open)
-	lcd.pcf8574.PCF_I2C_ADDRESS = 0x27;
-	lcd.pcf8574.PCF_I2C_TIMEOUT = 1000;
-	lcd.pcf8574.i2c.Instance = I2C1;
-	lcd.pcf8574.i2c.Init.ClockSpeed = 400000;
-	lcd.NUMBER_OF_LINES = NUMBER_OF_LINES_2; // Just use 2 lines instead of 4 
-	lcd.type = TYPE0;
 
-	if(LCD_Init(&lcd)!=LCD_OK){
-		// error occured
-		while(1);
-	}
-  
+  // Start the timer 1
+  HAL_TIM_Base_Start_IT(&htim1);
+
+  // LCDI2C_init
+  // The I2C address is 0x20 + A2,A1,A0
+  // A2, A1, A0 of PCF8574 are high (open)
+  lcd.pcf8574.PCF_I2C_ADDRESS = 0x27;
+  lcd.pcf8574.PCF_I2C_TIMEOUT = 1000;
+  lcd.pcf8574.i2c.Instance = I2C1;
+  lcd.pcf8574.i2c.Init.ClockSpeed = 400000;
+  lcd.NUMBER_OF_LINES = NUMBER_OF_LINES_2; // Just use 2 lines instead of 4
+  lcd.type = TYPE0;
+
+  if(LCD_Init(&lcd)!=LCD_OK){
+	  // error occured
+    Error_Handler();
+  }
+  // Setup the initial value of real time calendar
   RTC_CalendarConfig();
-	startCounter = RTC_ReadTimeCounter(&hrtc);
-	
+  // update the startCounter value
+  startCounter = RTC_ReadTimeCounter(&hrtc);
+
+	// Calibrate ADC1
   if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK)
   {
     // Calibration Error 
+    Error_Handler();
+  }
+  // Calibrate ADC2
+  if (HAL_ADCEx_Calibration_Start(&hadc2) != HAL_OK)
+  {
+    // Calibration Error
     Error_Handler();
   }
 	
@@ -668,34 +674,53 @@ void StartDefaultTask(void const * argument)
 void vTask2(void const * argument)
 {
   /* USER CODE BEGIN vTask2 */
-	char iMode = 1; // discharge
+	char iMode = 1; // discharge = 1, charging = 2
+  double voltage;
+  double current;
+	// Conversion factor for voltage measurement
 	double cnvVFactor = 1.0/4091.0*(3.3*0.989965903)/0.327317676;
+	// Conversion factor for current measurement
 	double cnvAFactor = 1.0/4091.0*(3.3*0.989965903)*0.28714866;
+	// Calculate k parameter for exponential moving average
 	ema_k = 2.0/(ema_N+1.0);
-	double voltage = 8.4;
-	double current = 0.5;
+	// Clear LCD
 	LCD_ClearDisplay(&lcd);
-	LCD_SetLocation(&lcd, 0, 0);
-	LCD_WriteString(&lcd, "V=      V I=0.5  A");
-//	lBuffer[20]=0;
+  // Set the location to (0,0) the first column and the first line
+  LCD_SetLocation(&lcd, 0, 0);
+  // Write voltage and current labels
+  if (iMode==1)
+    LCD_WriteString(&lcd, "Discharging!");
+  else
+    LCD_WriteString(&lcd, "Charging!");
+	// Set the location to (0,1) the first column and the second line
+	LCD_SetLocation(&lcd, 0, 1);
+	// Write voltage and current labels
+	LCD_WriteString(&lcd, "V=      V I=     A");
+  // Start the charging or discharging
 	HAL_GPIO_WritePin(CurrentSourceCtrl_GPIO_Port, CurrentSourceCtrl_Pin, GPIO_PIN_RESET);
-  osDelay(100);
+  // Wait until the voltage and current become stable.
+  osDelay(50);
+  // Start the conversion of ADC1
 	if (HAL_ADC_Start(&hadc1) != HAL_OK) {
 		/* ADC conversion start error */
 		Error_Handler();
 	}
+  // Start the conversion of ADC2
 	if (HAL_ADC_Start(&hadc2) != HAL_OK) {
 		/* ADC conversion start error */
 		Error_Handler();
 	}
+  // Check the end of conversion for ADC1
 	if (HAL_ADC_PollForConversion(&hadc1, 50) != HAL_OK) {
 		/* ADC polling error */
 		Error_Handler();
 	}
+  // Check the end of conversion for ADC2
 	if (HAL_ADC_PollForConversion(&hadc2, 50) != HAL_OK)	{
 		/* ADC polling error */
 		Error_Handler();
 	}
+	// Get the values from ADC1 and ADC2 and update moving average values
 	uint32_t iVValue = HAL_ADC_GetValue(&hadc1);
 	ema_Vvalue =  iVValue;
 	uint32_t iAValue = HAL_ADC_GetValue(&hadc2);
@@ -703,7 +728,7 @@ void vTask2(void const * argument)
   // Infinite loop 
   for(int i=0;;i++)
   {
-		printf("Task2:%d\n",i);
+		printf("Task2:%d\n",i); // Debug message
 		if (HAL_ADC_Start(&hadc1) != HAL_OK) {
 			/* ADC conversion start error */
 			Error_Handler();
@@ -721,25 +746,31 @@ void vTask2(void const * argument)
 			Error_Handler();
 		}
 		iVValue = HAL_ADC_GetValue(&hadc1);
+		// Update the moving average for voltage
 		ema_Vvalue = iVValue*ema_k+ema_Vvalue*(1.0-ema_k);
 		iAValue = HAL_ADC_GetValue(&hadc2);
+    // Update the moving average for current
 		ema_Avalue = iAValue*ema_k+ema_Avalue*(1.0-ema_k);
 		voltage = ema_Vvalue*cnvVFactor;
 		current = ema_Avalue*cnvAFactor;
 		// STM32 cannot reliably measure voltage less than 0.1V
-		if (current <0.03) current = 0.0; 
-		LCD_SetLocation(&lcd, 0, 0);
+		if (current <0.1) current = 0.0;
+		// Display the voltage and current estimated using exponential moving average
+		LCD_SetLocation(&lcd, 0, 1);
 		sprintf((char*)usbCdcTxBuffer,"V=%6.4fV I=%5.3fA",voltage,current);
 		LCD_WriteString(&lcd,(char*) usbCdcTxBuffer);
-		RTC_CalendarShow(aShowTime, aShowDate);
-		LCD_SetLocation(&lcd, 0, 2);
-		LCD_WriteString(&lcd,(char*) aShowTime);
+    // Show the time at the third line
+		//RTC_CalendarShow(aShowTime, aShowDate);
+		//LCD_SetLocation(&lcd, 0, 2);
+		//LCD_WriteString(&lcd,(char*) aShowTime);
 		uint32_t currentCounter = RTC_ReadTimeCounter(&hrtc);
 		currentCounter -= startCounter;
 		if(iMode){
-			LCD_SetLocation(&lcd,0,1);
+		  // Display the current time and calculated capacity (mAh) at the third line
+			LCD_SetLocation(&lcd,0,2);
 			sprintf((char*)usbCdcTxBuffer,"%5u sec %6.1f mAh",(unsigned int)currentCounter,currentCounter/3.6*0.5);
 			LCD_WriteString(&lcd,(char*) usbCdcTxBuffer);
+			// If the voltage reached the threshold value, turn the dis/charging off
 			if(currentCounter >= 30 && iMode == 1 && voltage <6.00) {
 				HAL_GPIO_WritePin(CurrentSourceCtrl_GPIO_Port, CurrentSourceCtrl_Pin, GPIO_PIN_SET);
 				iMode = 0;
@@ -751,6 +782,7 @@ void vTask2(void const * argument)
 		}
 		voltage = iVValue*cnvVFactor;
 		current = iAValue*cnvAFactor;
+		// Show the raw voltage and current values
 		LCD_SetLocation(&lcd, 0, 3);
 		sprintf((char*)usbCdcTxBuffer,"%6.4fV, %5.3fA",voltage,current);
 		LCD_WriteString(&lcd,(char*) usbCdcTxBuffer);
