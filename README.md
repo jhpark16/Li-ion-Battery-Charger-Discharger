@@ -74,7 +74,7 @@ The simulation directory has the files (Li-ion_Charger_Circuit_Simulation.asc an
 
 ### Input Pulse (V2, 30 seconds) to control the NPN transistor
 
-![Voltage graph](images/V2_voltage.png)
+![Voltage graph](images/V2_Voltage.png)
 
 The charging current through the n-channel Power MOSFET (IRFZ44N) is controlled by the ARM microcontroller (STM32F102) by turning on or off the NPN transistor (2N3904) using a digital output port (B5). This process is simulated with a 30 second 2V pulse. The Li-ion battery is charged when the transistor is off (the first 30 seconds) and is not charged when the transistor is on (next picture).
 
